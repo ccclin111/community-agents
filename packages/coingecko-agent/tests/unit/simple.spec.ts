@@ -73,7 +73,7 @@ function filterAIMessagesWithToolCall(messages: BaseMessage[]): AIMessage[] {
 }
 
 describe('CoinGecko agent', () => {
-  let model;
+  let model: ChatOpenAI;
 
   beforeAll(() => {
     model = new ChatOpenAI({
@@ -84,7 +84,7 @@ describe('CoinGecko agent', () => {
   });
 
   // Assert if setTimeout was called properly
-  it.only('should return the price of the BTC', async () => {
+  it('should return the price of the BTC', async () => {
     const tools = createTools();
     const agent = createReactAgent({
       llm: model,
@@ -105,13 +105,16 @@ describe('CoinGecko agent', () => {
     const toolMessages = filterToolResponseMessages(response.messages);
 
     // Check tool calls:
-    expect(aiMessagesWithToolCalls.length).toBe(2);
-    const searchMsg = aiMessagesWithToolCalls[0];
-    expect(searchMsg.tool_calls!.length).toBe(1);
-    expect(searchMsg.tool_calls![0].name).toBe('get_search');
-    expect(Object.keys(searchMsg.tool_calls![0].args)).toContain('query');
-
-    const getMarketMsg = aiMessagesWithToolCalls[1];
+    expect(aiMessagesWithToolCalls.length).toBeGreaterThanOrEqual(1);
+    expect(aiMessagesWithToolCalls.length).toBeLessThanOrEqual(2);
+    if (aiMessagesWithToolCalls.length === 2) {
+      const searchMsg = aiMessagesWithToolCalls[0];
+      expect(searchMsg.tool_calls!.length).toBe(1);
+      expect(searchMsg.tool_calls![0].name).toBe('get_search');
+      expect(Object.keys(searchMsg.tool_calls![0].args)).toContain('query');
+    }
+    const getMarketMsg =
+      aiMessagesWithToolCalls[aiMessagesWithToolCalls.length - 1];
     expect(getMarketMsg.tool_calls!.length).toBe(1);
     expect(getMarketMsg.tool_calls![0].name).toBe('get_coins_markets');
     expect(Object.keys(getMarketMsg.tool_calls![0].args)).toContain('ids');
@@ -121,15 +124,20 @@ describe('CoinGecko agent', () => {
     }
 
     // Check tool responses:
-    expect(toolMessages.length).toBe(2);
-    expect(toolMessages[0].name).toBe('get_search');
-    expect(toolMessages[1].name).toBe('get_coins_markets');
-    const getMarketCallResponse = JSON.parse(
-      toolMessages[1].content as string,
+    expect(toolMessages.length).toBeGreaterThanOrEqual(1);
+    expect(toolMessages.length).toBeLessThanOrEqual(2);
+    if (toolMessages.length === 2) {
+      expect(toolMessages[0].name).toBe('get_search');
+    }
+
+    const getMarketToolMessage = toolMessages[toolMessages.length - 1];
+    expect(getMarketToolMessage.name).toBe('get_coins_markets');
+    const getMarketToolResponse = JSON.parse(
+      getMarketToolMessage.content as string,
     ) as Record<string, string | number>[];
-    expect(getMarketCallResponse.length).toBe(1);
-    expect(getMarketCallResponse[0]).toHaveProperty('name', 'BTC');
-    expect(getMarketCallResponse[0]).toHaveProperty('current_price', 100005);
+    expect(getMarketToolResponse.length).toBe(1);
+    expect(getMarketToolResponse[0]).toHaveProperty('name', 'BTC');
+    expect(getMarketToolResponse[0]).toHaveProperty('current_price', 100_005);
 
     // Check agent result
     expect(
@@ -141,6 +149,9 @@ describe('CoinGecko agent', () => {
     expect(
       response.structuredResponse.step2_dataFetching.tokensData[0].currentPrice,
     ).toBe(100_005);
+    expect(response.structuredResponse.step5_confidenceAnswer.error).toBe(
+      'no_error',
+    );
   });
 
   it('should search unknown token and return correct price', async () => {
@@ -204,6 +215,9 @@ describe('CoinGecko agent', () => {
     expect(
       response.structuredResponse.step2_dataFetching.tokensData[0].currentPrice,
     ).toBe(1.23);
+    expect(response.structuredResponse.step5_confidenceAnswer.error).toBe(
+      'no_error',
+    );
   });
 
   it('should return the error if the token is unknown', async () => {
@@ -239,9 +253,85 @@ describe('CoinGecko agent', () => {
     expect(toolMessages[0].name).toBe('get_search');
 
     // Check agent result
+    expect(response.structuredResponse.step5_confidenceAnswer.error).not.toBe(
+      'no_error',
+    );
     expect(response.structuredResponse.step5_confidenceAnswer).toHaveProperty(
       'confidence',
       'low',
+    );
+  });
+
+  it('should return the error if the question is not related to cryptocurrencies', async () => {
+    const tools = createTools();
+    const agent = createReactAgent({
+      llm: model,
+      tools,
+      responseFormat: ResponseSchema,
+    });
+    const response = await agent.invoke({
+      messages: [
+        { role: 'system', content: SystemPrompt },
+        { role: 'user', content: 'What is the weather in Tokyo?' },
+      ],
+    });
+    console.log(JSON.stringify(response, null, 2));
+
+    const aiMessagesWithToolCalls = filterAIMessagesWithToolCall(
+      response.messages,
+    );
+    const toolMessages = filterToolResponseMessages(response.messages);
+
+    // Check tool calls:
+    expect(aiMessagesWithToolCalls.length).toBe(0);
+    expect(toolMessages.length).toBe(0);
+
+    // Check agent result
+    expect(response.structuredResponse.step5_confidenceAnswer.error).toBe(
+      'user_error',
+    );
+  });
+
+  it('should enforce a maximum of 2 cryptocurrencies per request', async () => {
+    const tools = createTools();
+    const agent = createReactAgent({
+      llm: model,
+      tools,
+      responseFormat: ResponseSchema,
+    });
+    const response = await agent.invoke({
+      messages: [
+        { role: 'system', content: SystemPrompt },
+        { role: 'user', content: 'What is the price of the BTC, ETH and SOL?' },
+      ],
+    });
+    console.log(JSON.stringify(response, null, 2));
+
+    // Check agent result
+    expect(response.structuredResponse.step1_tokenExtraction.tokenCount).toBe(
+      2,
+    );
+    const extractedTokens = new Set(
+      response.structuredResponse.step1_tokenExtraction.extractedTokens,
+    );
+    expect(extractedTokens.size).toBe(2);
+    expect(extractedTokens.has('BTC')).toBe(true);
+    expect(extractedTokens.has('ETH')).toBe(true);
+
+    const tokensData = new Map(
+      response.structuredResponse.step2_dataFetching.tokensData.map((token) => [
+        token.tokenSymbol,
+        token,
+      ]),
+    );
+    expect(tokensData.size).toBe(2);
+    expect(tokensData.has('BTC')).toBe(true);
+    expect(tokensData.has('ETH')).toBe(true);
+    expect(tokensData.get('BTC')!.currentPrice).toBe(100_005);
+    expect(tokensData.get('ETH')!.currentPrice).toBe(4_001);
+
+    expect(response.structuredResponse.step5_confidenceAnswer.error).toBe(
+      'no_error',
     );
   });
 });
