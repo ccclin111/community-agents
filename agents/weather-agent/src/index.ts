@@ -1,3 +1,7 @@
+/*
+* This file is used to test the agent locally through the CLI
+*/
+
 import dotenv from 'dotenv';
 import { runWeatherAgent } from './agent';
 import zod from 'zod';
