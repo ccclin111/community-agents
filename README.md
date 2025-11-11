@@ -2,9 +2,14 @@
 
 A collection of **Warden Community Agents and Tools** built with TypeScript or Python.
 
+💫 The [Agent Builder Incentive Programme](https://wardenprotocol.org/blog/agent-builder-incentive-programme) is live! 
+Register now and get paid for building agents! Up to $10,000 in incentives for each agent in the Top 10 in the first month.
+
 ## 📚 Documentation
 
 All documentation can be found in the [`docs/`](docs) directory.
+
+If you get stuck or you need to get in touch, join the `#developers` channel on our [Discord server](https://discord.gg/wardenprotocol).
 
 ## 🤖 Example Agents
 
